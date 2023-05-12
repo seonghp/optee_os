@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <tee_api_types.h>
 #include <types_ext.h>
+#include <kernel/user_access_arch.h>
 
 #ifdef CFG_WITH_USER_TA
 TEE_Result copy_from_user_private(void *kaddr, const void *uaddr, size_t len);
