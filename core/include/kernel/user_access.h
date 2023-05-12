@@ -34,6 +34,20 @@ static inline TEE_Result copy_from_user(void *kaddr __unused,
 TEE_Result copy_to_user_private(void *uaddr, const void *kaddr, size_t len);
 TEE_Result copy_to_user(void *uaddr, const void *kaddr, size_t len);
 
+TEE_Result clear_user(void *uaddr, size_t n);
+
+size_t strnlen_user(const void* s, size_t n);
+
+/*
+ * memdup_user() - duplicate a user-space buffer.
+ * @src:    Pointer to the user buffer to be duplicated.
+ * @len:    Length of the user buffer to be duplicated.
+ * @p:      Holds duplicated kernel buffer on success, or NULL on failure
+ * @returns TEE_SUCCESS on success, and TEE_ERROR_OUT_OF_MEMORY or
+ *          TEE_ERROR_ACCESS_DENIEND on error.
+ */
+TEE_Result memdup_user(const void *src, size_t len, void **p);
+
 TEE_Result copy_kaddr_to_uref(uint32_t *uref, void *kaddr);
 
 uint32_t kaddr_to_uref(void *kaddr);
