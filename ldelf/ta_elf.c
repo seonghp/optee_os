@@ -874,17 +874,15 @@ static void populate_segments(struct ta_elf *elf)
 				err(TEE_ERROR_NOT_SUPPORTED,
 				    "Segment must be readable");
 			if (flags & LDELF_MAP_FLAG_WRITEABLE) {
-				res = sys_map_zi(memsz, 0, &va, pad_begin,
-						 pad_end);
+				res = sys_map_zi_and_copy_from_ta_bin(
+					&va, memsz, pad_begin, pad_end, 0,
+					offset, filesz, elf->handle);
 				if (pad_begin && res == TEE_ERROR_OUT_OF_MEMORY)
-					res = sys_map_zi(memsz, 0, &va, 0,
-							 pad_end);
+					res = sys_map_zi_and_copy_from_ta_bin(
+						&va, memsz, 0, pad_end, 0,
+						offset, filesz, elf->handle);
 				if (res)
-					err(res, "sys_map_zi");
-				res = sys_copy_from_ta_bin((void *)va, filesz,
-							   elf->handle, offset);
-				if (res)
-					err(res, "sys_copy_from_ta_bin");
+					err(res, "sys_map_zi_and_copy_from_ta_bin");
 			} else {
 				if (filesz != memsz)
 					err(TEE_ERROR_BAD_FORMAT,

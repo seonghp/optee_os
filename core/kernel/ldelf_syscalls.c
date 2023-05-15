@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <crypto/crypto.h>
 #include <kernel/ldelf_syscalls.h>
+#include <kernel/user_access.h>
 #include <kernel/user_mode_ctx.h>
 #include <ldelf.h>
 #include <mm/file.h>
@@ -444,6 +445,90 @@ TEE_Result ldelf_syscall_copy_from_bin(void *dst, size_t offs, size_t num_bytes,
 		return TEE_ERROR_BAD_PARAMETERS;
 
 	return binh_copy_to(binh, (vaddr_t)dst, offs, num_bytes);
+}
+
+/*
+ * This system call is roughly equivalent to composition of map_zi and
+ * copy_from_ta_bin system calls. By merging them, the new memory region
+ * for the segment is not mapped into the user address space. This obviates
+ * use of bounce-buffer and unprivileged access function (i.e., copy_to_user),
+ * therefore prevents unnecessary memory overhead.
+ */
+TEE_Result ldelf_syscall_map_zi_and_cp_from_bin(vaddr_t *va, size_t memsz,
+						size_t pad_begin, size_t pad_end,
+						unsigned long flags,
+						size_t offs, size_t filesz,
+						unsigned long handle)
+{
+	TEE_Result res = TEE_SUCCESS;
+	struct ts_session *sess = ts_get_current_session();
+	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
+	struct system_ctx *sys_ctx = sess->user_ctx;
+	struct fobj *f = NULL;
+	struct mobj *mobj = NULL;
+	uint32_t prot = TEE_MATTR_PRW;
+	uint32_t vm_flags = 0;
+	struct bin_handle *binh = NULL;
+	vaddr_t vaddr = 0;
+
+	if (flags & ~LDELF_MAP_FLAG_SHAREABLE)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	if (flags & LDELF_MAP_FLAG_SHAREABLE)
+		vm_flags |= VM_FLAG_SHAREABLE;
+
+	f = fobj_ta_mem_alloc(ROUNDUP_DIV(memsz, SMALL_PAGE_SIZE));
+	if (!f)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	mobj = mobj_with_fobj_alloc(f, NULL, TEE_MATTR_MEM_TYPE_TAGGED);
+	fobj_put(f);
+	if (!mobj)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	GET_USER(vaddr, va);
+
+	res = vm_map_pad(uctx, &vaddr, memsz, prot, vm_flags,
+			 mobj, 0, pad_begin, pad_end, 0, false);
+	mobj_put(mobj);
+	if (res)
+		return res;
+
+	if (!sys_ctx) {
+		res = TEE_ERROR_BAD_PARAMETERS;
+		goto err_unmap_va;
+	}
+
+	binh = handle_lookup(&sys_ctx->db, handle);
+	if (!binh) {
+		res = TEE_ERROR_BAD_PARAMETERS;
+		goto err_unmap_va;
+	}
+
+	res = binh_copy_to(binh, vaddr, offs, filesz);
+	if (res)
+		goto err_unmap_va;
+
+	res = vm_set_prot(uctx, vaddr, ROUNDUP(memsz, SMALL_PAGE_SIZE), TEE_MATTR_URW);
+	if (res)
+		goto err_unmap_va;
+
+	/*
+	 * The context currently is active set it again to update
+	 * the mapping.
+	 */
+	vm_set_ctx(uctx->ts_ctx);
+
+	put_user(vaddr, va);
+
+	return res;
+err_unmap_va:
+	if (vm_unmap(uctx, vaddr, memsz))
+		panic();
+
+	vm_set_ctx(uctx->ts_ctx);
+
+	return res;
 }
 
 TEE_Result ldelf_syscall_set_prot(unsigned long va, size_t num_bytes,
