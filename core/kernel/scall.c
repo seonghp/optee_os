@@ -139,6 +139,7 @@ static const struct syscall_entry ldelf_syscall_table[] = {
 	SYSCALL_ENTRY(ldelf_syscall_set_prot),
 	SYSCALL_ENTRY(ldelf_syscall_remap),
 	SYSCALL_ENTRY(ldelf_syscall_gen_rnd_num),
+	SYSCALL_ENTRY(ldelf_syscall_map_zi_and_cp_from_bin),
 };
 
 #ifdef TRACE_SYSCALLS

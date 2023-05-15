@@ -18,3 +18,4 @@ LDELF_SYSCALL	_ldelf_cp_from_bin,	LDELF_CP_FROM_BIN,	4
 LDELF_SYSCALL	_ldelf_set_prot,	LDELF_SET_PROT,		4
 LDELF_SYSCALL	_ldelf_remap,		LDELF_REMAP,		7
 LDELF_SYSCALL	_ldelf_gen_rnd_num,	LDELF_GEN_RND_NUM,	2
+LDELF_SYSCALL	_ldelf_map_zi_and_cp_from_bin,  LDELF_MAP_ZI_AND_CP_FROM_BIN, 8
