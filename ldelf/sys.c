@@ -72,6 +72,16 @@ TEE_Result sys_copy_from_ta_bin(void *dst, size_t num_bytes, uint32_t handle,
 	return _ldelf_cp_from_bin(dst, offs, num_bytes, handle);
 }
 
+TEE_Result sys_map_zi_and_copy_from_ta_bin(vaddr_t *va, size_t memsz,
+					   size_t pad_begin, size_t pad_end,
+					   unsigned long flags,
+					   size_t offs, size_t filesz,
+					   unsigned long handle)
+{
+	return _ldelf_map_zi_and_cp_from_bin(va, memsz, pad_begin, pad_end,
+					     flags, offs, filesz, handle);
+}
+
 TEE_Result sys_set_prot(vaddr_t va, size_t num_bytes, uint32_t flags)
 {
 	return _ldelf_set_prot(va, num_bytes, flags);

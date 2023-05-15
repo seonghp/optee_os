@@ -128,8 +128,9 @@ struct dl_entry_arg {
 #define LDELF_SET_PROT		9
 #define LDELF_REMAP		10
 #define LDELF_GEN_RND_NUM	11
+#define LDELF_MAP_ZI_AND_CP_FROM_BIN	12
 
-#define LDELF_SCN_MAX		11
+#define LDELF_SCN_MAX		12
 
 /*
  * ldelf is loaded into memory by TEE Core. BSS is initialized and a
