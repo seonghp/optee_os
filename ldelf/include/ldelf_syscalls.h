@@ -24,6 +24,10 @@ TEE_Result _ldelf_map_bin(vaddr_t *va, size_t num_bytes, unsigned long handle,
 			  unsigned long flags);
 TEE_Result _ldelf_cp_from_bin(void *dst, size_t offs, size_t num_bytes,
 			      unsigned long handle);
+TEE_Result _ldelf_map_zi_and_cp_from_bin(vaddr_t *va, size_t memsz,
+					 size_t pad_begin, size_t pad_end,
+					 size_t map_offs, size_t file_offs,
+					 size_t filesz, unsigned long handle);
 TEE_Result _ldelf_set_prot(unsigned long va, size_t num_bytes,
 			   unsigned long flags);
 TEE_Result _ldelf_remap(unsigned long old_va, vaddr_t *new_va, size_t num_bytes,

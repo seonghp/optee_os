@@ -592,31 +592,6 @@ static void parse_load_segments(struct ta_elf *elf)
 	}
 }
 
-static void copy_remapped_to(struct ta_elf *elf, const struct segment *seg)
-{
-	uint8_t *dst = (void *)(seg->vaddr + elf->load_addr);
-	size_t n = 0;
-	size_t offs = seg->offset;
-	size_t num_bytes = seg->filesz;
-
-	if (offs < elf->max_offs) {
-		n = MIN(elf->max_offs - offs, num_bytes);
-		memcpy(dst, (void *)(elf->max_addr + offs - elf->max_offs), n);
-		dst += n;
-		offs += n;
-		num_bytes -= n;
-	}
-
-	if (num_bytes) {
-		TEE_Result res = sys_copy_from_ta_bin(dst, num_bytes,
-						      elf->handle, offs);
-
-		if (res)
-			err(res, "sys_copy_from_ta_bin");
-		elf->max_offs += offs;
-	}
-}
-
 static void adjust_segments(struct ta_elf *elf)
 {
 	struct segment *seg = NULL;
@@ -791,18 +766,44 @@ static void populate_segments(struct ta_elf *elf)
 					 seg->vaddr - seg->memsz);
 
 		if (seg->remapped_writeable) {
-			size_t num_bytes = roundup(seg->vaddr + seg->memsz) -
-					   rounddown(seg->vaddr);
+			size_t n = 0;
+			size_t map_offs = 0;
+			size_t file_offs = seg->offset;
+			size_t filesz = seg->filesz;
+			size_t memsz = roundup(seg->vaddr + seg->memsz) -
+				       rounddown(seg->vaddr);
+			void *dst = (void *)(seg->vaddr + elf->load_addr);
+			void *src = (void *)(elf->max_addr +
+					     file_offs - elf->max_offs);
+			unsigned long handle = elf->handle;
 
 			assert(elf->load_addr);
 			va = rounddown(elf->load_addr + seg->vaddr);
 			assert(va >= elf->max_addr);
-			res = sys_map_zi(num_bytes, 0, &va, 0, pad_end);
-			if (res)
-				err(res, "sys_map_zi");
 
-			copy_remapped_to(elf, seg);
-			elf->max_addr = va + num_bytes;
+			if (file_offs < elf->max_offs) {
+				n = MIN(elf->max_offs - file_offs, filesz);
+				map_offs += n;
+				file_offs += n;
+				filesz -= n;
+			}
+
+			if (filesz) {
+				res = sys_map_zi_and_copy_from_ta_bin(&va,
+								      memsz,
+								      0,
+								      pad_end,
+								      map_offs,
+								      file_offs,
+								      filesz,
+								      handle);
+				if (res)
+					err(res,
+					    "sys_map_zi_and_copy_from_ta_bin");
+			}
+
+			memcpy(dst, src, n);
+			elf->max_addr = va + memsz;
 		} else {
 			uint32_t flags =  0;
 			size_t filesz = seg->filesz;
@@ -874,17 +875,16 @@ static void populate_segments(struct ta_elf *elf)
 				err(TEE_ERROR_NOT_SUPPORTED,
 				    "Segment must be readable");
 			if (flags & LDELF_MAP_FLAG_WRITEABLE) {
-				res = sys_map_zi(memsz, 0, &va, pad_begin,
-						 pad_end);
+				res = sys_map_zi_and_copy_from_ta_bin(
+					&va, memsz, pad_begin, pad_end, 0,
+					offset, filesz, elf->handle);
 				if (pad_begin && res == TEE_ERROR_OUT_OF_MEMORY)
-					res = sys_map_zi(memsz, 0, &va, 0,
-							 pad_end);
+					res = sys_map_zi_and_copy_from_ta_bin(
+						&va, memsz, 0, pad_end, 0,
+						offset, filesz, elf->handle);
 				if (res)
-					err(res, "sys_map_zi");
-				res = sys_copy_from_ta_bin((void *)va, filesz,
-							   elf->handle, offset);
-				if (res)
-					err(res, "sys_copy_from_ta_bin");
+					err(res,
+					    "sys_map_zi_and_copy_from_ta_bin");
 			} else {
 				if (filesz != memsz)
 					err(TEE_ERROR_BAD_FORMAT,
