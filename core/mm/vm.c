@@ -13,6 +13,7 @@
 #include <kernel/tee_common.h>
 #include <kernel/tee_misc.h>
 #include <kernel/tlb_helpers.h>
+#include <kernel/user_access.h>
 #include <kernel/user_mode_ctx.h>
 #include <kernel/virtualization.h>
 #include <mm/core_memprot.h>
@@ -295,7 +296,7 @@ static TEE_Result umap_add_region(struct vm_info *vmi, struct vm_region *reg,
 TEE_Result vm_map_pad(struct user_mode_ctx *uctx, vaddr_t *va, size_t len,
 		      uint32_t prot, uint32_t flags, struct mobj *mobj,
 		      size_t offs, size_t pad_begin, size_t pad_end,
-		      size_t align)
+		      size_t align, bool va_is_user)
 {
 	TEE_Result res = TEE_SUCCESS;
 	struct vm_region *reg = NULL;
@@ -322,10 +323,13 @@ TEE_Result vm_map_pad(struct user_mode_ctx *uctx, vaddr_t *va, size_t len,
 
 	reg->mobj = mobj_get(mobj);
 	reg->offset = offs;
-	reg->va = *va;
 	reg->size = ROUNDUP(len, SMALL_PAGE_SIZE);
 	reg->attr = attr | prot;
 	reg->flags = flags;
+	if (va_is_user)
+		GET_USER(reg->va, va);
+	else
+		reg->va = *va;
 
 	res = umap_add_region(&uctx->vm_info, reg, pad_begin, pad_end, align);
 	if (res)
@@ -358,7 +362,10 @@ TEE_Result vm_map_pad(struct user_mode_ctx *uctx, vaddr_t *va, size_t len,
 	if (thread_get_tsd()->ctx == uctx->ts_ctx)
 		vm_set_ctx(uctx->ts_ctx);
 
-	*va = reg->va;
+	if (va_is_user)
+		PUT_USER(reg->va, va);
+	else
+		*va = reg->va;
 
 	return TEE_SUCCESS;
 
@@ -867,7 +874,7 @@ static TEE_Result map_kinit(struct user_mode_ctx *uctx)
 		if (IS_ENABLED(CFG_CORE_BTI))
 			prot |= TEE_MATTR_GUARDED;
 		res = vm_map(uctx, &va, sz, prot, VM_FLAG_PERMANENT,
-			     mobj, offs);
+			     mobj, offs, false);
 		if (res)
 			return res;
 	}
@@ -875,7 +882,7 @@ static TEE_Result map_kinit(struct user_mode_ctx *uctx)
 	thread_get_user_kdata(&mobj, &offs, &va, &sz);
 	if (sz)
 		return vm_map(uctx, &va, sz, TEE_MATTR_PRW, VM_FLAG_PERMANENT,
-			      mobj, offs);
+			      mobj, offs, false);
 
 	return TEE_SUCCESS;
 }
@@ -1051,7 +1058,7 @@ TEE_Result vm_map_param(struct user_mode_ctx *uctx, struct tee_ta_param *param,
 		res = vm_map(uctx, &va, mem[n].size,
 			     TEE_MATTR_PRW | TEE_MATTR_URW,
 			     VM_FLAG_EPHEMERAL | VM_FLAG_SHAREABLE,
-			     mem[n].mobj, mem[n].offs);
+			     mem[n].mobj, mem[n].offs, false);
 		if (res)
 			goto out;
 	}

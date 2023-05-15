@@ -191,7 +191,7 @@ static TEE_Result alloc_and_map_sp_fobj(struct stmm_ctx *spc, size_t sz,
 		return TEE_ERROR_OUT_OF_MEMORY;
 
 	res = vm_map(&spc->uctx, va, num_pgs * SMALL_PAGE_SIZE,
-		     prot, 0, mobj, 0);
+		     prot, 0, mobj, 0, false);
 	if (res)
 		mobj_put(mobj);
 

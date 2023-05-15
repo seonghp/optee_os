@@ -279,7 +279,7 @@ TEE_Result sp_map_shared(struct sp_session *s,
 
 	SLIST_FOREACH(reg, &smem->regions, link) {
 		res = vm_map(&ctx->uctx, va, reg->page_count * SMALL_PAGE_SIZE,
-			     perm, 0, reg->mobj, reg->page_offset);
+			     perm, 0, reg->mobj, reg->page_offset, false);
 
 		if (res != TEE_SUCCESS) {
 			EMSG("Failed to map memory region %#"PRIx32, res);
@@ -462,7 +462,7 @@ static TEE_Result load_binary_sp(struct ts_session *s,
 
 	/* Map memory area for the SP binary */
 	res = vm_map(uctx, &va, bin_size_rounded, TEE_MATTR_URWX,
-		     vm_flags, mobj, 0);
+		     vm_flags, mobj, 0, false);
 	if (res)
 		goto err_free_mobj;
 
@@ -614,7 +614,7 @@ static TEE_Result sp_init_info(struct sp_ctx *ctx, struct thread_smc_args *args,
 	if (!m)
 		return TEE_ERROR_OUT_OF_MEMORY;
 
-	res = vm_map(&ctx->uctx, va, total_size, perm, 0, m, 0);
+	res = vm_map(&ctx->uctx, va, total_size, perm, 0, m, 0, false);
 	mobj_put(m);
 	if (res)
 		return res;
@@ -756,7 +756,7 @@ static TEE_Result handle_fdt_load_relative_mem_regions(struct sp_ctx *ctx,
 				goto err_mm_free;
 			}
 
-			res = vm_map(&ctx->uctx, &va, size, perm, 0, m, 0);
+			res = vm_map(&ctx->uctx, &va, size, perm, 0, m, 0, false);
 			mobj_put(m);
 			if (res)
 				goto err_mm_free;
@@ -859,7 +859,7 @@ static TEE_Result handle_fdt_dev_regions(struct sp_ctx *ctx, void *fdt)
 		}
 
 		res = vm_map(&ctx->uctx, &va, pages_cnt * SMALL_PAGE_SIZE,
-			     perm, 0, m, 0);
+			     perm, 0, m, 0, false);
 		mobj_put(m);
 		if (res)
 			return res;
@@ -1079,7 +1079,7 @@ static TEE_Result handle_fdt_mem_regions(struct sp_ctx *ctx, void *fdt)
 			goto err_mm_free;
 		}
 
-		res = vm_map(&ctx->uctx, &va, size, perm, 0, m, 0);
+		res = vm_map(&ctx->uctx, &va, size, perm, 0, m, 0, false);
 		mobj_put(m);
 		if (res)
 			goto err_mm_free;
@@ -1157,7 +1157,7 @@ static TEE_Result handle_tpm_event_log(struct sp_ctx *ctx, void *fdt)
 	if (!m)
 		return TEE_ERROR_OUT_OF_MEMORY;
 
-	res = vm_map(&ctx->uctx, &log_addr, log_size, perm, 0, m, 0);
+	res = vm_map(&ctx->uctx, &log_addr, log_size, perm, 0, m, 0, false);
 	mobj_put(m);
 	if (res)
 		return res;

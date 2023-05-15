@@ -52,7 +52,7 @@ TEE_Result ldelf_syscall_map_zi(vaddr_t *va, size_t num_bytes, size_t pad_begin,
 	if (!mobj)
 		return TEE_ERROR_OUT_OF_MEMORY;
 	res = vm_map_pad(uctx, va, num_bytes, prot, vm_flags,
-			 mobj, 0, pad_begin, pad_end, 0);
+			 mobj, 0, pad_begin, pad_end, 0, true);
 	mobj_put(mobj);
 
 	return res;
@@ -360,7 +360,7 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 		}
 		res = vm_map_pad(uctx, va, num_rounded_bytes,
 				 prot, VM_FLAG_READONLY,
-				 mobj, 0, pad_begin, pad_end, 0);
+				 mobj, 0, pad_begin, pad_end, 0, true);
 		mobj_put(mobj);
 		if (res)
 			goto err;
@@ -386,7 +386,7 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 		}
 		res = vm_map_pad(uctx, va, num_rounded_bytes,
 				 TEE_MATTR_PRW, vm_flags, mobj, 0,
-				 pad_begin, pad_end, 0);
+				 pad_begin, pad_end, 0, true);
 		mobj_put(mobj);
 		if (res)
 			goto err;

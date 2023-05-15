@@ -302,7 +302,7 @@ static void user_ta_dump_ftrace(struct ts_ctx *ctx)
 		goto out_free_pl;
 
 	res = vm_map(&utc->uctx, &va, mobj->size, prot, VM_FLAG_EPHEMERAL,
-		     mobj, 0);
+		     mobj, 0, false);
 	if (res)
 		goto out_free_pl;
 

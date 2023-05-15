@@ -40,7 +40,7 @@ static TEE_Result alloc_and_map_ldelf_fobj(struct user_mode_ctx *uctx,
 	if (!mobj)
 		return TEE_ERROR_OUT_OF_MEMORY;
 	res = vm_map(uctx, va, num_pgs * SMALL_PAGE_SIZE,
-		     prot, VM_FLAG_LDELF, mobj, 0);
+		     prot, VM_FLAG_LDELF, mobj, 0, false);
 	mobj_put(mobj);
 
 	return res;
