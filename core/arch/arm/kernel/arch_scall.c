@@ -8,6 +8,7 @@
 #include <kernel/scall.h>
 #include <kernel/thread.h>
 #include <kernel/trace_ta.h>
+#include <kernel/user_access.h>
 #include <kernel/user_ta.h>
 #include <mm/vm.h>
 #include <types_ext.h>
@@ -94,9 +95,15 @@ static void save_panic_regs_a32_ta(struct thread_specific_data *tsd,
 static void save_panic_regs_a64_ta(struct thread_specific_data *tsd,
 				   uint64_t *pushed)
 {
+	uint64_t x29 = 0;
+	uint64_t elr = 0;
+
+	GET_USER(x29, &pushed[0]);
+	GET_USER(elr, &pushed[1]);
+
 	tsd->abort_regs = (struct thread_abort_regs){
-		.x29 = pushed[0],
-		.elr = pushed[1],
+		.x29 = x29,
+		.elr = elr,
 		.spsr = (SPSR_64_MODE_EL0 << SPSR_64_MODE_EL_SHIFT),
 	};
 }
