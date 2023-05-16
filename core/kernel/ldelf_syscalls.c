@@ -37,12 +37,17 @@ TEE_Result ldelf_syscall_map_zi(vaddr_t *va, size_t num_bytes, size_t pad_begin,
 	struct mobj *mobj = NULL;
 	uint32_t prot = TEE_MATTR_URW | TEE_MATTR_PRW;
 	uint32_t vm_flags = 0;
+	vaddr_t vaddr = 0;
 
 	if (flags & ~LDELF_MAP_FLAG_SHAREABLE)
 		return TEE_ERROR_BAD_PARAMETERS;
 
 	if (flags & LDELF_MAP_FLAG_SHAREABLE)
 		vm_flags |= VM_FLAG_SHAREABLE;
+
+	res = GET_USER_SCALAR(vaddr, va);
+	if (res)
+		return res;
 
 	f = fobj_ta_mem_alloc(ROUNDUP_DIV(num_bytes, SMALL_PAGE_SIZE));
 	if (!f)
@@ -51,11 +56,23 @@ TEE_Result ldelf_syscall_map_zi(vaddr_t *va, size_t num_bytes, size_t pad_begin,
 	fobj_put(f);
 	if (!mobj)
 		return TEE_ERROR_OUT_OF_MEMORY;
-	res = vm_map_pad(uctx, va, num_bytes, prot, vm_flags,
+
+	res = vm_map_pad(uctx, &vaddr, num_bytes, prot, vm_flags,
 			 mobj, 0, pad_begin, pad_end, 0);
 	mobj_put(mobj);
 
-	return res;
+	if (res)
+		return res;
+
+	res = PUT_USER_SCALAR(vaddr, va);
+	if (res) {
+		if (vm_unmap(uctx, vaddr, num_bytes))
+			panic();
+
+		return res;
+	}
+
+	return TEE_SUCCESS;
 }
 
 TEE_Result ldelf_syscall_unmap(vaddr_t va, size_t num_bytes)
@@ -102,26 +119,12 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 {
 	TEE_Result res = TEE_SUCCESS;
 	struct ts_session *sess = ts_get_current_session();
-	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
 	struct system_ctx *sys_ctx = sess->user_ctx;
 	struct bin_handle *binh = NULL;
 	uint8_t tag[FILE_TAG_SIZE] = { 0 };
 	unsigned int tag_len = sizeof(tag);
+	TEE_UUID uuid_kbuf = { };
 	int h = 0;
-
-	res = vm_check_access_rights(uctx,
-				     TEE_MEMORY_ACCESS_READ |
-				     TEE_MEMORY_ACCESS_ANY_OWNER,
-				     (uaddr_t)uuid, sizeof(TEE_UUID));
-	if (res)
-		return res;
-
-	res = vm_check_access_rights(uctx,
-				     TEE_MEMORY_ACCESS_WRITE |
-				     TEE_MEMORY_ACCESS_ANY_OWNER,
-				     (uaddr_t)handle, sizeof(uint32_t));
-	if (res)
-		return res;
 
 	if (uuid_size != sizeof(*uuid))
 		return TEE_ERROR_BAD_PARAMETERS;
@@ -133,17 +136,21 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 		sess->user_ctx = sys_ctx;
 	}
 
+	res = copy_from_user(&uuid_kbuf, uuid, uuid_size);
+	if (res)
+		return res;
+
 	binh = calloc(1, sizeof(*binh));
 	if (!binh)
-		return TEE_ERROR_OUT_OF_MEMORY;
+		goto err_oom;
 
 	if (is_user_ta_ctx(sess->ctx) || is_stmm_ctx(sess->ctx)) {
 		SCATTERED_ARRAY_FOREACH(binh->op, ta_stores,
 					struct ts_store_ops) {
 			DMSG("Lookup user TA ELF %pUl (%s)",
-			     (void *)uuid, binh->op->description);
+			     (void *)&uuid_kbuf, binh->op->description);
 
-			res = binh->op->open(uuid, &binh->h);
+			res = binh->op->open(&uuid_kbuf, &binh->h);
 			DMSG("res=%#"PRIx32, res);
 			if (res != TEE_ERROR_ITEM_NOT_FOUND &&
 			    res != TEE_ERROR_STORAGE_NOT_AVAILABLE)
@@ -153,9 +160,9 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 		SCATTERED_ARRAY_FOREACH(binh->op, sp_stores,
 					struct ts_store_ops) {
 			DMSG("Lookup user SP ELF %pUl (%s)",
-			     (void *)uuid, binh->op->description);
+			     (void *)&uuid_kbuf, binh->op->description);
 
-			res = binh->op->open(uuid, &binh->h);
+			res = binh->op->open(&uuid_kbuf, &binh->h);
 			DMSG("res=%#"PRIx32, res);
 			if (res != TEE_ERROR_ITEM_NOT_FOUND &&
 			    res != TEE_ERROR_STORAGE_NOT_AVAILABLE)
@@ -164,7 +171,6 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 	} else {
 		res = TEE_ERROR_ITEM_NOT_FOUND;
 	}
-
 	if (res)
 		goto err;
 
@@ -181,7 +187,10 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 	h = handle_get(&sys_ctx->db, binh);
 	if (h < 0)
 		goto err_oom;
-	*handle = h;
+
+	res = PUT_USER_SCALAR(h, handle);
+	if (res)
+		goto err;
 
 	return TEE_SUCCESS;
 
@@ -275,6 +284,7 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 	uint32_t offs_pages = 0;
 	size_t num_pages = 0;
 	uint32_t prot = 0;
+	vaddr_t vaddr = 0;
 	const uint32_t accept_flags = LDELF_MAP_FLAG_SHAREABLE |
 				      LDELF_MAP_FLAG_WRITEABLE |
 				      LDELF_MAP_FLAG_BTI |
@@ -282,6 +292,10 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 
 	if (!sys_ctx)
 		return TEE_ERROR_BAD_PARAMETERS;
+
+	res = GET_USER_SCALAR(vaddr, va);
+	if (res)
+		return res;
 
 	binh = handle_lookup(&sys_ctx->db, handle);
 	if (!binh)
@@ -347,12 +361,17 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 			res = TEE_ERROR_OUT_OF_MEMORY;
 			goto err;
 		}
-		res = vm_map_pad(uctx, va, num_rounded_bytes,
+
+		res = vm_map_pad(uctx, &vaddr, num_rounded_bytes,
 				 prot, VM_FLAG_READONLY,
 				 mobj, 0, pad_begin, pad_end, 0);
 		mobj_put(mobj);
 		if (res)
 			goto err;
+
+		res = PUT_USER_SCALAR(vaddr, va);
+		if (res)
+			goto err_unmap_va;
 	} else {
 		struct fobj *f = fobj_ta_mem_alloc(num_pages);
 		struct file *file = NULL;
@@ -373,16 +392,18 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 			res = TEE_ERROR_OUT_OF_MEMORY;
 			goto err;
 		}
-		res = vm_map_pad(uctx, va, num_rounded_bytes,
+
+		res = vm_map_pad(uctx, &vaddr, num_rounded_bytes,
 				 TEE_MATTR_PRW, vm_flags, mobj, 0,
 				 pad_begin, pad_end, 0);
 		mobj_put(mobj);
 		if (res)
 			goto err;
-		res = binh_copy_to(binh, *va, offs_bytes, num_bytes);
+
+		res = binh_copy_to(binh, vaddr, offs_bytes, num_bytes);
 		if (res)
 			goto err_unmap_va;
-		res = vm_set_prot(uctx, *va, num_rounded_bytes,
+		res = vm_set_prot(uctx, vaddr, num_rounded_bytes,
 				  prot);
 		if (res)
 			goto err_unmap_va;
@@ -398,6 +419,10 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 			if (res)
 				goto err_unmap_va;
 		}
+
+		res = PUT_USER_SCALAR(vaddr, va);
+		if (res)
+			goto err_unmap_va;
 	}
 
 	file_unlock(binh->f);
@@ -405,7 +430,7 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 	return TEE_SUCCESS;
 
 err_unmap_va:
-	if (vm_unmap(uctx, *va, num_rounded_bytes))
+	if (vm_unmap(uctx, vaddr, num_rounded_bytes))
 		panic();
 
 	/*
@@ -426,16 +451,9 @@ TEE_Result ldelf_syscall_copy_from_bin(void *dst, size_t offs, size_t num_bytes,
 {
 	TEE_Result res = TEE_SUCCESS;
 	struct ts_session *sess = ts_get_current_session();
-	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
 	struct system_ctx *sys_ctx = sess->user_ctx;
 	struct bin_handle *binh = NULL;
-
-	res = vm_check_access_rights(uctx,
-				     TEE_MEMORY_ACCESS_WRITE |
-				     TEE_MEMORY_ACCESS_ANY_OWNER,
-				     (uaddr_t)dst, num_bytes);
-	if (res)
-		return res;
+	void *buf = NULL;
 
 	if (!sys_ctx)
 		return TEE_ERROR_BAD_PARAMETERS;
@@ -444,7 +462,16 @@ TEE_Result ldelf_syscall_copy_from_bin(void *dst, size_t offs, size_t num_bytes,
 	if (!binh)
 		return TEE_ERROR_BAD_PARAMETERS;
 
-	return binh_copy_to(binh, (vaddr_t)dst, offs, num_bytes);
+	buf = malloc(num_bytes);
+	if (!buf)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	res = binh_copy_to(binh, (vaddr_t)buf, offs, num_bytes);
+	if (!res)
+		res = copy_to_user(dst, buf, num_bytes);
+
+	free(buf);
+	return res;
 }
 
 /*
@@ -592,20 +619,21 @@ TEE_Result ldelf_syscall_remap(unsigned long old_va, vaddr_t *new_va,
 	return res;
 }
 
-TEE_Result ldelf_syscall_gen_rnd_num(void *buf, size_t num_bytes)
+TEE_Result ldelf_syscall_gen_rnd_num(void *dst, size_t num_bytes)
 {
+	void *buf = NULL;
 	TEE_Result res = TEE_SUCCESS;
-	struct ts_session *sess = ts_get_current_session();
-	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
 
-	res = vm_check_access_rights(uctx,
-				     TEE_MEMORY_ACCESS_WRITE |
-				     TEE_MEMORY_ACCESS_ANY_OWNER,
-				     (uaddr_t)buf, num_bytes);
-	if (res)
-		return res;
+	buf = malloc(sizeof(num_bytes));
+	if (!buf)
+		return TEE_ERROR_OUT_OF_MEMORY;
 
-	return crypto_rng_read(buf, num_bytes);
+	res = crypto_rng_read(buf, num_bytes);
+	if (!res)
+		res = copy_to_user(dst, buf, num_bytes);
+
+	free(buf);
+	return res;
 }
 
 /*
