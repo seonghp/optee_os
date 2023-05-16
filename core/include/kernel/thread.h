@@ -105,6 +105,9 @@ short int thread_get_id(void);
  */
 short int thread_get_id_may_fail(void);
 
+/* Returns Thread Specific Data (TSD) pointer. Return NULL on failure. */
+struct thread_specific_data *thread_get_tsd_may_fail(void);
+
 /* Returns Thread Specific Data (TSD) pointer. */
 struct thread_specific_data *thread_get_tsd(void);
 

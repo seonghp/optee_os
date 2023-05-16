@@ -499,6 +499,14 @@ void thread_init_core_local_pauth_keys(void)
 }
 #endif
 
+struct thread_specific_data * __noprof thread_get_tsd_may_fail(void)
+{
+	short int thread_id = thread_get_id_may_fail();
+	if (thread_id == THREAD_ID_INVALID)
+		return NULL;
+	return &threads[thread_id].tsd;
+}
+
 struct thread_specific_data * __noprof thread_get_tsd(void)
 {
 	return &threads[thread_get_id()].tsd;

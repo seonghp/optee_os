@@ -62,7 +62,13 @@ struct ts_session *ts_get_calling_session(void)
 
 struct ts_session *ts_get_current_session_may_fail(void)
 {
-	return TAILQ_FIRST(&thread_get_tsd()->sess_stack);
+	struct thread_specific_data* tsd;
+
+	tsd = thread_get_tsd_may_fail();
+	if (!tsd)
+		return NULL;
+
+	return TAILQ_FIRST(&tsd->sess_stack);
 }
 
 struct ts_session *ts_get_current_session(void)
