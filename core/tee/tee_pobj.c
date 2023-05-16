@@ -3,6 +3,8 @@
  * Copyright (c) 2014, STMicroelectronics International N.V.
  */
 
+#include "kernel/user_access.h"
+#include "tee_api_defines.h"
 #include <kernel/mutex.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,14 +66,36 @@ TEE_Result tee_pobj_get(TEE_UUID *uuid, void *obj_id, uint32_t obj_id_len,
 {
 	TEE_Result res = TEE_SUCCESS;
 	struct tee_pobj *o = NULL;
+	void *obj_id_kbuf = NULL;
+	bool obj_id_from_user = true;
 
 	*obj = NULL;
+
+	res = memdup_user(obj_id, obj_id_len, &obj_id_kbuf);
+	switch (res) {
+	case TEE_SUCCESS:
+		break;
+	case TEE_ERROR_ACCESS_DENIED:
+		/*
+		 * Since the caller of tee_pobj_get() checks if obj_id is
+		 * accessible if obj_id is a user address
+		 * (See vm_check_access_rights), we know that if
+		 * copy_from_user(..., obj_id, ...) fails here,
+		 * it's because obj_id is not a user address. Hence, it is
+		 * now safe to assume that obj_id is in kernel address space.
+		 */
+		obj_id_from_user = false;
+		obj_id_kbuf = obj_id;
+		break;
+	default:
+		return res;
+	} 
 
 	mutex_lock(&pobjs_mutex);
 	/* Check if file is open */
 	TAILQ_FOREACH(o, &tee_pobjs, link) {
 		if ((obj_id_len == o->obj_id_len) &&
-		    (memcmp(obj_id, o->obj_id, obj_id_len) == 0) &&
+		    (memcmp(obj_id_kbuf, o->obj_id, obj_id_len) == 0) &&
 		    (memcmp(uuid, &o->uuid, sizeof(TEE_UUID)) == 0) &&
 		    (fops == o->fops)) {
 			*obj = o;
@@ -117,7 +141,7 @@ TEE_Result tee_pobj_get(TEE_UUID *uuid, void *obj_id, uint32_t obj_id_len,
 		res = TEE_ERROR_OUT_OF_MEMORY;
 		goto out;
 	}
-	memcpy(o->obj_id, obj_id, obj_id_len);
+	memcpy(o->obj_id, obj_id_kbuf, obj_id_len);
 	o->obj_id_len = obj_id_len;
 
 	TAILQ_INSERT_TAIL(&tee_pobjs, o, link);
@@ -127,6 +151,8 @@ TEE_Result tee_pobj_get(TEE_UUID *uuid, void *obj_id, uint32_t obj_id_len,
 out:
 	if (res != TEE_SUCCESS)
 		*obj = NULL;
+	if (obj_id_from_user && obj_id_kbuf != NULL)
+		free(obj_id_kbuf);
 	mutex_unlock(&pobjs_mutex);
 	return res;
 }

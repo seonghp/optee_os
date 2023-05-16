@@ -107,6 +107,7 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 	struct bin_handle *binh = NULL;
 	uint8_t tag[FILE_TAG_SIZE] = { 0 };
 	unsigned int tag_len = sizeof(tag);
+	void *uuid_kbuf = NULL;
 	int h = 0;
 
 	res = vm_check_access_rights(uctx,
@@ -133,17 +134,21 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 		sess->user_ctx = sys_ctx;
 	}
 
+	res = memdup_user(uuid, uuid_size, (void **)&uuid_kbuf);
+	if (res)
+		return res;
+
 	binh = calloc(1, sizeof(*binh));
 	if (!binh)
-		return TEE_ERROR_OUT_OF_MEMORY;
+		goto err_oom;
 
 	if (is_user_ta_ctx(sess->ctx) || is_stmm_ctx(sess->ctx)) {
 		SCATTERED_ARRAY_FOREACH(binh->op, ta_stores,
 					struct ts_store_ops) {
 			DMSG("Lookup user TA ELF %pUl (%s)",
-			     (void *)uuid, binh->op->description);
+			     (void *)uuid_kbuf, binh->op->description);
 
-			res = binh->op->open(uuid, &binh->h);
+			res = binh->op->open(uuid_kbuf, &binh->h);
 			DMSG("res=%#"PRIx32, res);
 			if (res != TEE_ERROR_ITEM_NOT_FOUND &&
 			    res != TEE_ERROR_STORAGE_NOT_AVAILABLE)
@@ -153,9 +158,9 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 		SCATTERED_ARRAY_FOREACH(binh->op, sp_stores,
 					struct ts_store_ops) {
 			DMSG("Lookup user SP ELF %pUl (%s)",
-			     (void *)uuid, binh->op->description);
+			     (void *)uuid_kbuf, binh->op->description);
 
-			res = binh->op->open(uuid, &binh->h);
+			res = binh->op->open(uuid_kbuf, &binh->h);
 			DMSG("res=%#"PRIx32, res);
 			if (res != TEE_ERROR_ITEM_NOT_FOUND &&
 			    res != TEE_ERROR_STORAGE_NOT_AVAILABLE)
@@ -181,13 +186,18 @@ TEE_Result ldelf_syscall_open_bin(const TEE_UUID *uuid, size_t uuid_size,
 	h = handle_get(&sys_ctx->db, binh);
 	if (h < 0)
 		goto err_oom;
-	*handle = h;
+
+	PUT_USER(h, handle);
+
+	free(uuid_kbuf);
 
 	return TEE_SUCCESS;
 
 err_oom:
 	res = TEE_ERROR_OUT_OF_MEMORY;
 err:
+	if (uuid_kbuf)
+		free(uuid_kbuf);
 	bin_close(binh);
 	return res;
 }
@@ -275,6 +285,7 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 	uint32_t offs_pages = 0;
 	size_t num_pages = 0;
 	uint32_t prot = 0;
+	vaddr_t vaddr;
 	const uint32_t accept_flags = LDELF_MAP_FLAG_SHAREABLE |
 				      LDELF_MAP_FLAG_WRITEABLE |
 				      LDELF_MAP_FLAG_BTI |
@@ -379,10 +390,13 @@ TEE_Result ldelf_syscall_map_bin(vaddr_t *va, size_t num_bytes,
 		mobj_put(mobj);
 		if (res)
 			goto err;
-		res = binh_copy_to(binh, *va, offs_bytes, num_bytes);
+
+		GET_USER(vaddr, va);
+
+		res = binh_copy_to(binh, vaddr, offs_bytes, num_bytes);
 		if (res)
 			goto err_unmap_va;
-		res = vm_set_prot(uctx, *va, num_rounded_bytes,
+		res = vm_set_prot(uctx, vaddr, num_rounded_bytes,
 				  prot);
 		if (res)
 			goto err_unmap_va;
@@ -429,6 +443,7 @@ TEE_Result ldelf_syscall_copy_from_bin(void *dst, size_t offs, size_t num_bytes,
 	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
 	struct system_ctx *sys_ctx = sess->user_ctx;
 	struct bin_handle *binh = NULL;
+	void *buf = NULL;
 
 	res = vm_check_access_rights(uctx,
 				     TEE_MEMORY_ACCESS_WRITE |
@@ -444,7 +459,18 @@ TEE_Result ldelf_syscall_copy_from_bin(void *dst, size_t offs, size_t num_bytes,
 	if (!binh)
 		return TEE_ERROR_BAD_PARAMETERS;
 
-	return binh_copy_to(binh, (vaddr_t)dst, offs, num_bytes);
+	buf = malloc(num_bytes);
+	if (!buf)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	res = binh_copy_to(binh, (vaddr_t)buf, offs, num_bytes);
+	if (res)
+		goto out;
+
+	res = copy_to_user(dst, buf, num_bytes);
+out:
+	free(buf);
+	return res;
 }
 
 /*
@@ -519,7 +545,7 @@ TEE_Result ldelf_syscall_map_zi_and_cp_from_bin(vaddr_t *va, size_t memsz,
 	 */
 	vm_set_ctx(uctx->ts_ctx);
 
-	put_user(vaddr, va);
+	PUT_USER(vaddr, va);
 
 	return res;
 err_unmap_va:
@@ -601,20 +627,23 @@ TEE_Result ldelf_syscall_remap(unsigned long old_va, vaddr_t *new_va,
 	return res;
 }
 
-TEE_Result ldelf_syscall_gen_rnd_num(void *buf, size_t num_bytes)
+TEE_Result ldelf_syscall_gen_rnd_num(void *dst, size_t num_bytes)
 {
+	void *buf = NULL;
 	TEE_Result res = TEE_SUCCESS;
-	struct ts_session *sess = ts_get_current_session();
-	struct user_mode_ctx *uctx = to_user_mode_ctx(sess->ctx);
+	
+	buf = malloc(sizeof(num_bytes));
+	if (!buf)
+		return TEE_ERROR_OUT_OF_MEMORY;
 
-	res = vm_check_access_rights(uctx,
-				     TEE_MEMORY_ACCESS_WRITE |
-				     TEE_MEMORY_ACCESS_ANY_OWNER,
-				     (uaddr_t)buf, num_bytes);
+	res = crypto_rng_read(buf, num_bytes);
 	if (res)
-		return res;
+		goto out;
 
-	return crypto_rng_read(buf, num_bytes);
+	res = copy_to_user(dst, buf, num_bytes);
+out:
+	free(buf);
+	return res;
 }
 
 /*

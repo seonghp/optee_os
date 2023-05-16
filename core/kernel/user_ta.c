@@ -54,7 +54,13 @@ static void init_utee_param(struct utee_params *up,
 {
 	size_t n;
 
-	up->types = p->types;
+	/*
+	 * NOTE: The type of up->types is uint64_t, while the type of p->types
+	 * is uint32_t. Hence, to avoid unexpected behaviors
+	 */
+	clear_user(&up->types, sizeof(up->types));
+	copy_to_user(&up->types, &p->types, sizeof(p->types));
+
 	for (n = 0; n < TEE_NUM_PARAMS; n++) {
 		uintptr_t a;
 		uintptr_t b;
@@ -77,8 +83,8 @@ static void init_utee_param(struct utee_params *up,
 			break;
 		}
 		/* See comment for struct utee_params in utee_types.h */
-		up->vals[n * 2] = a;
-		up->vals[n * 2 + 1] = b;
+		copy_to_user(&up->vals[n * 2], &a, sizeof(a));
+		copy_to_user(&up->vals[n * 2 + 1], &b, sizeof(b));
 	}
 }
 
@@ -161,7 +167,7 @@ static TEE_Result user_ta_enter(struct ts_session *session,
 	if (ta_sess->param)
 		init_utee_param(usr_params, ta_sess->param, param_va);
 	else
-		memset(usr_params, 0, sizeof(*usr_params));
+		clear_user(usr_params, sizeof(*usr_params));
 
 	res = thread_enter_user_mode(func, kaddr_to_uref(session),
 				     (vaddr_t)usr_params, cmd, usr_stack,

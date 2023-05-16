@@ -554,6 +554,10 @@ static bool cmp_region_for_remap(const struct vm_region *r0,
 	       r0->mobj == r->mobj && rn->offset == r->offset + r->size;
 }
 
+/*
+ * NOTE: `new_va` always belongs to userland. Hence, it is safe to always use
+ * user-access functions to access `new_va` within this function.
+ */
 TEE_Result vm_remap(struct user_mode_ctx *uctx, vaddr_t *new_va, vaddr_t old_va,
 		    size_t len, size_t pad_begin, size_t pad_end)
 {
@@ -605,7 +609,7 @@ TEE_Result vm_remap(struct user_mode_ctx *uctx, vaddr_t *new_va, vaddr_t old_va,
 			r->va = r_last->va + r_last->size;
 			res = umap_add_region(&uctx->vm_info, r, 0, 0, 0);
 		} else {
-			r->va = *new_va;
+			GET_USER(r->va, new_va);
 			res = umap_add_region(&uctx->vm_info, r, pad_begin,
 					      pad_end + len - r->size, 0);
 		}
@@ -657,7 +661,7 @@ TEE_Result vm_remap(struct user_mode_ctx *uctx, vaddr_t *new_va, vaddr_t old_va,
 	fobj_put(fobj);
 
 	vm_set_ctx(uctx->ts_ctx);
-	*new_va = r_first->va;
+	PUT_USER(r_first->va, new_va);
 
 	return TEE_SUCCESS;
 

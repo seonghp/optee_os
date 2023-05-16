@@ -18,6 +18,7 @@
 #include <mm/mobj.h>
 #include <mm/tee_mm.h>
 #include <mm/vm.h>
+#include <stdint.h>
 #include <stdlib_ext.h>
 #include <tee_api_types.h>
 #include <tee/tee_cryp_utl.h>
@@ -588,14 +589,19 @@ static TEE_Result utee_param_to_param(struct user_ta_ctx *utc,
 				      struct utee_params *up)
 {
 	size_t n = 0;
-	uint32_t types = up->types;
+	uint64_t types = 0;
+
+	GET_USER(types, &up->types);
 
 	p->types = types;
 	for (n = 0; n < TEE_NUM_PARAMS; n++) {
-		uintptr_t a = up->vals[n * 2];
-		size_t b = up->vals[n * 2 + 1];
+		uintptr_t a = 0;
+		size_t b = 0;
 		uint32_t flags = TEE_MEMORY_ACCESS_READ |
 				 TEE_MEMORY_ACCESS_ANY_OWNER;
+
+		GET_USER(a, &up->vals[n * 2]);
+		GET_USER(b, &up->vals[n * 2 + 1]);
 
 		switch (TEE_PARAM_TYPE_GET(types, n)) {
 		case TEE_PARAM_TYPE_MEMREF_OUTPUT:
@@ -690,7 +696,7 @@ static TEE_Result tee_svc_copy_param(struct ts_session *sess,
 
 	/* fill 'param' input struct with caller params description buffer */
 	if (!callee_params) {
-		memset(param, 0, sizeof(*param));
+		clear_user(param, sizeof(*param));
 	} else {
 		uint32_t flags = TEE_MEMORY_ACCESS_READ |
 				 TEE_MEMORY_ACCESS_WRITE |
@@ -816,8 +822,12 @@ static TEE_Result tee_svc_update_out_param(
 	size_t n;
 	uint64_t *vals = usr_param->vals;
 	size_t sz = 0;
+	size_t in_sz = 0;
 
 	for (n = 0; n < TEE_NUM_PARAMS; n++) {
+		uint64_t a = 0;
+		uint64_t b = 0;
+
 		switch (TEE_PARAM_TYPE_GET(param->types, n)) {
 		case TEE_PARAM_TYPE_MEMREF_OUTPUT:
 		case TEE_PARAM_TYPE_MEMREF_INOUT:
@@ -828,7 +838,10 @@ static TEE_Result tee_svc_update_out_param(
 			 * size needs to be updated.
 			 */
 			sz = param->u[n].mem.size;
-			if (tmp_buf_va[n] && sz <= vals[n * 2 + 1]) {
+
+			GET_USER(in_sz, &vals[n * 2 + 1]);
+
+			if (tmp_buf_va[n] && sz <= in_sz) {
 				void *src = tmp_buf_va[n];
 				void *dst = (void *)(uintptr_t)vals[n * 2];
 				TEE_Result res = TEE_SUCCESS;
@@ -845,13 +858,16 @@ static TEE_Result tee_svc_update_out_param(
 						return res;
 				}
 			}
-			usr_param->vals[n * 2 + 1] = sz;
+			PUT_USER(sz, &usr_param->vals[n * 2 + 1]);
 			break;
 
 		case TEE_PARAM_TYPE_VALUE_OUTPUT:
 		case TEE_PARAM_TYPE_VALUE_INOUT:
-			vals[n * 2] = param->u[n].val.a;
-			vals[n * 2 + 1] = param->u[n].val.b;
+			a = (uint64_t)param->u[n].val.a;
+			b = (uint64_t)param->u[n].val.b;
+
+			PUT_USER(a, &vals[n * 2]);
+			PUT_USER(b, &vals[n * 2 + 1]);
 			break;
 
 		default:

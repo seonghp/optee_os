@@ -15,6 +15,7 @@
 #include <kernel/pseudo_ta.h>
 #include <kernel/tpm.h>
 #include <kernel/ts_store.h>
+#include <kernel/user_access.h>
 #include <kernel/user_mode_ctx.h>
 #include <ldelf.h>
 #include <mm/file.h>
@@ -37,6 +38,8 @@ static TEE_Result system_rng_reseed(uint32_t param_types,
 {
 	size_t entropy_sz = 0;
 	uint8_t *entropy_input = NULL;
+	void *seed = NULL;
+	TEE_Result res = TEE_SUCCESS;
 	uint32_t exp_pt = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 					  TEE_PARAM_TYPE_NONE,
 					  TEE_PARAM_TYPE_NONE,
@@ -50,9 +53,16 @@ static TEE_Result system_rng_reseed(uint32_t param_types,
 	if (!entropy_sz || !entropy_input)
 		return TEE_ERROR_BAD_PARAMETERS;
 
+	res = memdup_user(entropy_input, entropy_sz, &seed);
+	if (res)
+		return res;
+
 	crypto_rng_add_event(CRYPTO_RNG_SRC_NONSECURE, &system_pnum,
-			     entropy_input, entropy_sz);
-	return TEE_SUCCESS;
+			     seed, entropy_sz);
+
+	free(seed);
+
+	return res;
 }
 
 static TEE_Result system_derive_ta_unique_key(struct user_mode_ctx *uctx,
@@ -63,6 +73,7 @@ static TEE_Result system_derive_ta_unique_key(struct user_mode_ctx *uctx,
 	TEE_Result res = TEE_ERROR_GENERIC;
 	uint8_t *data = NULL;
 	uint32_t access_flags = 0;
+	void *subkey = NULL;
 	uint32_t exp_pt = TEE_PARAM_TYPES(TEE_PARAM_TYPE_MEMREF_INPUT,
 					  TEE_PARAM_TYPE_MEMREF_OUTPUT,
 					  TEE_PARAM_TYPE_NONE,
@@ -103,14 +114,26 @@ static TEE_Result system_derive_ta_unique_key(struct user_mode_ctx *uctx,
 	memcpy(data, &uctx->ts_ctx->uuid, sizeof(TEE_UUID));
 
 	/* Append the user provided data */
-	memcpy(data + sizeof(TEE_UUID), params[0].memref.buffer,
-	       params[0].memref.size);
+	res = copy_from_user(data + sizeof(TEE_UUID), params[0].memref.buffer,
+			     params[0].memref.size);
+	if (res)
+		goto out;
+
+	res = memdup_user(params[1].memref.buffer, params[1].memref.size, &subkey);
+	if (res)
+		goto out;
 
 	res = huk_subkey_derive(HUK_SUBKEY_UNIQUE_TA, data, data_len,
-				params[1].memref.buffer,
-				params[1].memref.size);
-	free_wipe(data);
+				subkey, params[1].memref.size);
+	if (res)
+		goto out_free_subkey;
 
+	res = copy_to_user(params[1].memref.buffer, subkey, params[1].memref.size);
+
+out_free_subkey:
+	free_wipe(subkey);
+out:
+	free_wipe(data);
 	return res;
 }
 

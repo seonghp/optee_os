@@ -642,6 +642,7 @@ TEE_Result syscall_storage_next_enum(unsigned long obj_enum,
 	TEE_Result res = TEE_SUCCESS;
 	struct tee_obj *o = NULL;
 	uint64_t l = 0;
+	struct utee_object_info buf = { };
 
 	res = tee_svc_storage_get_enum(utc, uref_to_vaddr(obj_enum), &e);
 	if (res != TEE_SUCCESS)
@@ -688,7 +689,7 @@ TEE_Result syscall_storage_next_enum(unsigned long obj_enum,
 	if (res != TEE_SUCCESS)
 		goto exit;
 
-	*info = (struct utee_object_info){
+	buf = (struct utee_object_info){
 		.obj_type = o->info.objectType,
 		.obj_size = o->info.objectSize,
 		.max_obj_size = o->info.maxObjectSize,
@@ -697,7 +698,13 @@ TEE_Result syscall_storage_next_enum(unsigned long obj_enum,
 		.data_pos = o->info.dataPosition,
 		.handle_flags = o->info.handleFlags,
 	};
-	memcpy(obj_id, o->pobj->obj_id, o->pobj->obj_id_len);
+	res = copy_to_user(info, &buf, sizeof(buf));
+	if (res)
+		goto exit;
+
+	res = copy_to_user(obj_id, o->pobj->obj_id, o->pobj->obj_id_len);
+	if (res)
+		goto exit;
 
 	l = o->pobj->obj_id_len;
 	res = copy_to_user_private(len, &l, sizeof(*len));

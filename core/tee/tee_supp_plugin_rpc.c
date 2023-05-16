@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <kernel/thread.h>
+#include <kernel/user_access.h>
 #include <mm/mobj.h>
 #include <optee_rpc_cmd.h>
 #include <stddef.h>
@@ -24,6 +25,7 @@ TEE_Result tee_invoke_supp_plugin_rpc(const TEE_UUID *uuid, uint32_t cmd,
 	uint32_t uuid_words[4] = { };
 	void *va = NULL;
 	struct mobj *mobj = NULL;
+	void *uuid_kbuf = NULL;
 
 	/*
 	 * sizeof 'TEE_UUID' and array 'uuid_words' must be same size,
@@ -54,7 +56,11 @@ TEE_Result tee_invoke_supp_plugin_rpc(const TEE_UUID *uuid, uint32_t cmd,
 		memcpy(va, buf, len);
 	}
 
-	tee_uuid_to_octets((uint8_t *)uuid_words, uuid);
+	res = memdup_user(uuid, sizeof(*uuid), &uuid_kbuf);
+	if (res)
+		goto out;
+
+	tee_uuid_to_octets((uint8_t *)uuid_words, uuid_kbuf);
 
 	params[0] = THREAD_PARAM_VALUE(IN, OPTEE_RPC_SUPP_PLUGIN_INVOKE,
 				       uuid_words[0], uuid_words[1]);
@@ -73,6 +79,9 @@ TEE_Result tee_invoke_supp_plugin_rpc(const TEE_UUID *uuid, uint32_t cmd,
 out:
 	if (len)
 		thread_rpc_free_payload(mobj);
+
+	if (uuid_kbuf)
+		free(uuid_kbuf);
 
 	return res;
 }
