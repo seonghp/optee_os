@@ -119,7 +119,8 @@ static TEE_Result system_derive_ta_unique_key(struct user_mode_ctx *uctx,
 	if (res)
 		goto out;
 
-	res = memdup_user(params[1].memref.buffer, params[1].memref.size, &subkey);
+	res = memdup_user(params[1].memref.buffer, params[1].memref.size,
+			  &subkey);
 	if (res)
 		goto out;
 
@@ -128,7 +129,8 @@ static TEE_Result system_derive_ta_unique_key(struct user_mode_ctx *uctx,
 	if (res)
 		goto out;
 
-	res = copy_to_user(params[1].memref.buffer, subkey, params[1].memref.size);
+	res = copy_to_user(params[1].memref.buffer, subkey,
+			   params[1].memref.size);
 
 out:
 	free_wipe(subkey);
