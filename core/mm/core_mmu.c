@@ -1011,8 +1011,14 @@ static size_t collect_mem_ranges(struct tee_mmap_region *memory_map,
 				 size_t num_elems)
 {
 	const struct core_mmu_phys_mem *mem = NULL;
-	vaddr_t ram_start = secure_only[0].paddr;
+	vaddr_t tee_ram_start;
 	size_t last = 0;
+
+	if (IS_ENABLED(CFG_CORE_PHYS_RELOCATABLE) &&
+	    !IS_ENABLED(CFG_CORE_SEL2_SPMC))
+		tee_ram_start = secure_only[0].paddr;
+	else
+		tee_ram_start = core_mmu_tee_load_pa;
 
 
 #define ADD_PHYS_MEM(_type, _addr, _size) \
@@ -1020,8 +1026,8 @@ static size_t collect_mem_ranges(struct tee_mmap_region *memory_map,
 			     (_addr), (_size),  &last)
 
 	if (IS_ENABLED(CFG_CORE_RWDATA_NOEXEC)) {
-		ADD_PHYS_MEM(MEM_AREA_TEE_RAM_RO, ram_start,
-			     VCORE_UNPG_RX_PA - ram_start);
+		ADD_PHYS_MEM(MEM_AREA_TEE_RAM_RO, tee_ram_start,
+			     VCORE_UNPG_RX_PA - tee_ram_start);
 		ADD_PHYS_MEM(MEM_AREA_TEE_RAM_RX, VCORE_UNPG_RX_PA,
 			     VCORE_UNPG_RX_SZ);
 		ADD_PHYS_MEM(MEM_AREA_TEE_RAM_RO, VCORE_UNPG_RO_PA,
@@ -1356,12 +1362,18 @@ static unsigned long init_mem_map(struct tee_mmap_region *memory_map,
 	 */
 	vaddr_t id_map_start = (vaddr_t)__identity_map_init_start;
 	vaddr_t id_map_end = (vaddr_t)__identity_map_init_end;
-	vaddr_t start_addr = secure_only[0].paddr;
+	vaddr_t tee_start_addr;
 	unsigned long offs = 0;
 	size_t last = 0;
 
 	last = collect_mem_ranges(memory_map, num_elems);
 	assign_mem_granularity(memory_map);
+
+	if (IS_ENABLED(CFG_CORE_PHYS_RELOCATABLE) &&
+	    !IS_ENABLED(CFG_CORE_SEL2_SPMC))
+		tee_start_addr = core_mmu_tee_load_pa;
+	else
+		tee_start_addr = secure_only[0].paddr;
 
 	/*
 	 * To ease mapping and lower use of xlat tables, sort mapping
@@ -1374,7 +1386,7 @@ static unsigned long init_mem_map(struct tee_mmap_region *memory_map,
 		add_pager_vaspace(memory_map, num_elems, &last);
 
 	if (IS_ENABLED(CFG_CORE_ASLR) && seed) {
-		vaddr_t base_addr = start_addr + seed;
+		vaddr_t base_addr = tee_start_addr + seed;
 		const unsigned int va_width = core_mmu_get_va_width();
 		const vaddr_t va_mask = GENMASK_64(va_width - 1,
 						   SMALL_PAGE_SHIFT);
@@ -1388,7 +1400,7 @@ static unsigned long init_mem_map(struct tee_mmap_region *memory_map,
 			if (assign_mem_va(ba, memory_map) &&
 			    mem_map_add_id_map(memory_map, num_elems, &last,
 					       id_map_start, id_map_end)) {
-				offs = ba - start_addr;
+				offs = ba - tee_start_addr;
 				DMSG("Mapping core at %#"PRIxVA" offs %#lx",
 				     ba, offs);
 				goto out;
@@ -1399,7 +1411,7 @@ static unsigned long init_mem_map(struct tee_mmap_region *memory_map,
 		EMSG("Failed to map core with seed %#lx", seed);
 	}
 
-	if (!assign_mem_va(start_addr, memory_map))
+	if (!assign_mem_va(tee_start_addr, memory_map))
 		panic();
 
 out:
